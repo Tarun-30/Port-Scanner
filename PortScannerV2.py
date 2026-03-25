@@ -24,7 +24,7 @@ def validate(start, end):
  
 def main():
     print("=" * 55)
-    print("   AntiGravity Port Scanner  v2.0 — Multi-Threaded")
+    print("Port Scanner  v2.0 — Multi-Threaded")
     print("=" * 55)
  
     target = input("Enter target IP or hostname: ").strip()

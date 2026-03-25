@@ -9,7 +9,7 @@ def scan_port(ip, port, timeout=1.0):
  
 def main():
     print("=" * 50)
-    print("   AntiGravity Port Scanner  v1.0 — Basic")
+    print("Port Scanner  v1.0 — Basic")
     print("=" * 50)
  
     target = input("Enter target IP or hostname: ").strip()
