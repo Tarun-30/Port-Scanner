@@ -12,7 +12,7 @@ from datetime import datetime
  
 # ══ PAGE CONFIG ═══════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="AntiGravity Port Scanner",
+    page_title="Port Scanner",
     page_icon="🛸",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -351,7 +351,7 @@ def build_txt(target, ip, os_guess, mode, elapsed, sorted_r):
         lines.append(f"  {r['port']:<8}{r['service']:<18}{r['risk']:<10}{r['banner'][:25]}")
         if r["cve_note"]:
             lines.append(f"         NOTE: {r['cve_note']}")
-    lines += ["=" * 62, "", "AntiGravity Port Scanner — github.com/Tarun-30"]
+    lines += ["=" * 62, "", "Port Scanner — github.com/Tarun-30"]
     return "\n".join(lines)
  
 # ══ PAGE HEADER ═══════════════════════════════════════════════════════════════
@@ -401,8 +401,13 @@ with st.sidebar:
 ⚠ Only scan systems you own or have explicit permission to test.
 </small></div>""", unsafe_allow_html=True)
  
+# ══ SESSION STATE INIT ════════════════════════════════════════════════════════
+if "scan_done" not in st.session_state:
+    st.session_state.scan_done    = False
+    st.session_state.scan_targets = {}   # ip → {sorted_r, os_guess, elapsed, target, mode}
+ 
 # ══ IDLE STATE ════════════════════════════════════════════════════════════════
-if not run_btn:
+if not run_btn and not st.session_state.scan_done:
     st.markdown("""
 <div style='text-align:center; padding:5rem 0; color:#111128;'>
     <div style='font-size:5rem;'>🛸</div>
@@ -415,192 +420,212 @@ if not run_btn:
 </div>""", unsafe_allow_html=True)
     st.stop()
  
-# ══ VALIDATE INPUT ════════════════════════════════════════════════════════════
-if not target_in.strip():
-    st.error("⚠️ Please enter a target IP, hostname, or CIDR subnet.")
-    st.stop()
- 
-# ══ BUILD PORT LIST ═══════════════════════════════════════════════════════════
-if mode == "Top Common Ports (~49)":
-    ports_base = list(TOP_PORTS)
-elif mode == "Well-Known (1–1024)":
-    ports_base = list(range(1, 1025))
-elif mode == "Full Range (1–65535)":
-    ports_base = list(range(1, 65536))
-else:
-    ports_base = list(range(int(start_p), int(end_p) + 1))
- 
-if stealth:
-    random.shuffle(ports_base)
-    threads = min(threads, 50)
-    timeout = max(timeout, 1.0)
- 
-# ══ RESOLVE / SUBNET SWEEP ════════════════════════════════════════════════════
-targets = []
- 
-if subnet_mode:
-    ph = st.empty()
-    ph.info(f"🔍 Sweeping subnet **{target_in}** for live hosts...")
-    with st.spinner("Ping sweep running..."):
-        targets = subnet_live_hosts(target_in.strip())
-    ph.empty()
- 
-    if not targets:
-        st.warning("No live hosts found in that subnet.")
+# ══ RUN SCAN (only when button pressed) ═══════════════════════════════════════
+if run_btn:
+    if not target_in.strip():
+        st.error("⚠️ Please enter a target IP, hostname, or CIDR subnet.")
         st.stop()
  
-    st.markdown('<div class="section-head">LIVE HOSTS FOUND</div>', unsafe_allow_html=True)
-    pills = "".join(f'<span class="host-pill">● {h}</span>' for h in targets)
-    st.markdown(f"<div>{pills}</div>", unsafe_allow_html=True)
-    st.markdown(f"**{len(targets)} live host(s)** will be scanned.")
-    st.markdown("---")
-else:
-    try:
-        ip = socket.gethostbyname(target_in.strip())
-        targets = [target_in.strip()]
-    except socket.gaierror:
-        st.error(f"❌ Cannot resolve: `{target_in}`")
-        st.stop()
- 
-# ══ SCAN EACH TARGET ══════════════════════════════════════════════════════════
-for target in targets:
-    try:
-        ip = socket.gethostbyname(target)
-    except socket.gaierror:
-        st.warning(f"⚠ Cannot resolve {target} — skipping"); continue
- 
-    st.markdown(f'<div class="section-head">SCANNING — {target} ({ip})</div>',
-                unsafe_allow_html=True)
- 
-    # OS Fingerprint
-    with st.spinner(f"Fingerprinting OS for {ip}..."):
-        os_guess = os_hint(ip)
- 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("🎯 Target",  target)
-    m2.metric("💻 OS Hint", os_guess.split("(")[0].strip())
-    m3.metric("🔢 Ports",   f"{len(ports_base):,}")
-    m4.metric("🧵 Threads", threads if not stealth else f"{threads} (stealth)")
+    # Build port list
+    if mode == "Top Common Ports (~49)":
+        ports_base = list(TOP_PORTS)
+    elif mode == "Well-Known (1–1024)":
+        ports_base = list(range(1, 1025))
+    elif mode == "Full Range (1–65535)":
+        ports_base = list(range(1, 65536))
+    else:
+        ports_base = list(range(int(start_p), int(end_p) + 1))
  
     if stealth:
-        st.info("🥷 Stealth mode — randomized order, capped threads, raised timeout")
+        random.shuffle(ports_base)
+        threads = min(threads, 50)
+        timeout = max(timeout, 1.0)
  
-    prog_bar  = st.progress(0, text="Initializing...")
-    status_ph = st.empty()
-    t0        = time.time()
- 
-    def make_cb(pb, sp):
-        def cb(done, total, open_count):
-            pct = done / total
-            pb.progress(pct, text=f"Scanning {done}/{total} — {open_count} open found")
-            if done % 150 == 0 or done == total:
-                sp.markdown(
-                    f"`{datetime.now().strftime('%H:%M:%S')}` "
-                    f"**{done}/{total}** scanned | **{open_count}** open"
-                )
-        return cb
- 
-    scan_results = run_scan(ip, ports_base[:], threads, timeout,
-                            do_banner, make_cb(prog_bar, status_ph))
-    elapsed = time.time() - t0
- 
-    prog_bar.progress(1.0, text=f"✅ Done — {len(scan_results)} open port(s) found")
-    status_ph.empty()
- 
-    sorted_r = sorted(scan_results, key=lambda x: x["port"])
-    highs    = [r for r in sorted_r if r["risk"] == "HIGH"]
-    meds     = [r for r in sorted_r if r["risk"] == "MEDIUM"]
-    lows     = [r for r in sorted_r if r["risk"] == "LOW"]
- 
-    # ── Stats ──────────────────────────────────────────────────────────────
-    s1, s2, s3, s4, s5 = st.columns(5)
-    for col, num, lbl, color in [
-        (s1, len(sorted_r), "OPEN PORTS",  "#00ff88"),
-        (s2, len(highs),    "HIGH RISK",   "#ff3333"),
-        (s3, len(meds),     "MEDIUM RISK", "#ffaa00"),
-        (s4, len(lows),     "LOW RISK",    "#00ccff"),
-        (s5, f"{elapsed:.1f}s", "SCAN TIME", "#555"),
-    ]:
-        col.markdown(f"""<div class="stat-card">
-            <div class="stat-num" style="color:{color}">{num}</div>
-            <div class="stat-lbl">{lbl}</div></div>""", unsafe_allow_html=True)
- 
-    # ── OS fingerprint ──────────────────────────────────────────────────────
-    st.markdown(
-        f'<div style="margin:0.8rem 0 0.2rem 0;">OS Fingerprint: '
-        f'<span class="os-badge">{os_guess}</span></div>',
-        unsafe_allow_html=True
-    )
- 
-    # ── Open ports table ────────────────────────────────────────────────────
-    if sorted_r:
-        st.markdown('<div class="section-head">OPEN PORTS</div>', unsafe_allow_html=True)
- 
-        risk_filter = st.selectbox(
-            "Filter", ["All", "HIGH", "MEDIUM", "LOW"],
-            key=f"rf_{ip}", label_visibility="collapsed"
-        )
-        filtered = sorted_r if risk_filter == "All" else \
-                   [r for r in sorted_r if r["risk"] == risk_filter]
- 
-        h1, h2, h3, h4 = st.columns([1, 2, 1.5, 4])
-        h1.markdown("**PORT**"); h2.markdown("**SERVICE**")
-        h3.markdown("**RISK**"); h4.markdown("**BANNER / NOTE**")
- 
-        for r in filtered:
-            c1, c2, c3, c4 = st.columns([1, 2, 1.5, 4])
-            ri  = r["risk"]
-            ico = {"HIGH":"🔴","MEDIUM":"🟡","LOW":"🟢"}.get(ri,"⚪")
-            c1.markdown(f"`{r['port']}`")
-            c2.markdown(f"**{r['service']}**")
-            c3.markdown(f"{ico} **{ri}**")
-            bnr = f"`{r['banner'][:45]}`" if r["banner"] else ""
-            tip = r["cve_note"] if r["cve_note"] else None
-            cve = " ⚠️" if r["cve_note"] else ""
-            c4.markdown(f"{bnr}{cve}", help=tip)
- 
-        # ── CVE Alerts ──────────────────────────────────────────────────────
-        cve_ports = [r for r in sorted_r if r["cve_note"]]
-        if cve_ports:
-            st.markdown('<div class="section-head">🚨 CVE / SECURITY ALERTS</div>',
-                        unsafe_allow_html=True)
-            for r in cve_ports:
-                ico = "🔴" if r["risk"] == "HIGH" else "🟡"
-                st.error(f"{ico} **Port {r['port']} ({r['service']})** — {r['cve_note']}")
- 
-        # ── High Risk Summary (mirrors v6 terminal output) ──────────────────
-        if highs:
-            st.markdown('<div class="section-head">⚠ HIGH RISK SUMMARY</div>',
-                        unsafe_allow_html=True)
-            for r in highs:
-                note = r["cve_note"] or "Commonly exploited — review immediately"
-                st.markdown(
-                    f'<div class="cve-block">• Port <b>{r["port"]}</b> '
-                    f'({r["service"]}) — {note}</div>',
-                    unsafe_allow_html=True
-                )
+    # Resolve targets
+    targets = []
+    if subnet_mode:
+        ph = st.empty()
+        ph.info(f"🔍 Sweeping subnet **{target_in}** for live hosts...")
+        with st.spinner("Ping sweep running..."):
+            targets = subnet_live_hosts(target_in.strip())
+        ph.empty()
+        if not targets:
+            st.warning("No live hosts found in that subnet.")
+            st.stop()
+        st.markdown('<div class="section-head">LIVE HOSTS FOUND</div>', unsafe_allow_html=True)
+        pills = "".join(f'<span class="host-pill">● {h}</span>' for h in targets)
+        st.markdown(f"<div>{pills}</div>", unsafe_allow_html=True)
+        st.markdown(f"**{len(targets)} live host(s)** will be scanned.")
+        st.markdown("---")
     else:
-        st.info(f"No open ports found on {ip}.")
+        try:
+            ip = socket.gethostbyname(target_in.strip())
+            targets = [target_in.strip()]
+        except socket.gaierror:
+            st.error(f"❌ Cannot resolve: `{target_in}`")
+            st.stop()
  
-    # ── Export ──────────────────────────────────────────────────────────────
-    st.markdown('<div class="section-head">💾 EXPORT REPORT</div>', unsafe_allow_html=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    e1, e2 = st.columns(2)
-    e1.download_button("⬇️ Download JSON",
-        data=build_json(target, ip, os_guess, mode, elapsed, sorted_r),
-        file_name=f"scan_{ip}_{stamp}.json",
-        mime="application/json", key=f"json_{ip}_{stamp}")
-    e2.download_button("⬇️ Download TXT",
-        data=build_txt(target, ip, os_guess, mode, elapsed, sorted_r),
-        file_name=f"scan_{ip}_{stamp}.txt",
-        mime="text/plain", key=f"txt_{ip}_{stamp}")
+    # Clear previous results
+    st.session_state.scan_targets = {}
  
-    st.markdown("---")
+    for target in targets:
+        try:
+            ip = socket.gethostbyname(target)
+        except socket.gaierror:
+            st.warning(f"⚠ Cannot resolve {target} — skipping"); continue
+ 
+        st.markdown(f'<div class="section-head">SCANNING — {target} ({ip})</div>',
+                    unsafe_allow_html=True)
+ 
+        with st.spinner(f"Fingerprinting OS for {ip}..."):
+            os_guess = os_hint(ip)
+ 
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("🎯 Target",  target)
+        m2.metric("💻 OS Hint", os_guess.split("(")[0].strip())
+        m3.metric("🔢 Ports",   f"{len(ports_base):,}")
+        m4.metric("🧵 Threads", threads if not stealth else f"{threads} (stealth)")
+ 
+        if stealth:
+            st.info("🥷 Stealth mode — randomized order, capped threads, raised timeout")
+ 
+        prog_bar  = st.progress(0, text="Initializing...")
+        status_ph = st.empty()
+        t0        = time.time()
+ 
+        def make_cb(pb, sp):
+            def cb(done, total, open_count):
+                pct = done / total
+                pb.progress(pct, text=f"Scanning {done}/{total} — {open_count} open found")
+                if done % 150 == 0 or done == total:
+                    sp.markdown(
+                        f"`{datetime.now().strftime('%H:%M:%S')}` "
+                        f"**{done}/{total}** scanned | **{open_count}** open"
+                    )
+            return cb
+ 
+        scan_results = run_scan(ip, ports_base[:], threads, timeout,
+                                do_banner, make_cb(prog_bar, status_ph))
+        elapsed = time.time() - t0
+ 
+        prog_bar.progress(1.0, text=f"✅ Done — {len(scan_results)} open port(s) found")
+        status_ph.empty()
+ 
+        # ── SAVE TO SESSION STATE ──────────────────────────────────────────
+        st.session_state.scan_targets[ip] = {
+            "target":   target,
+            "ip":       ip,
+            "os_guess": os_guess,
+            "mode":     mode,
+            "elapsed":  elapsed,
+            "sorted_r": sorted(scan_results, key=lambda x: x["port"]),
+            "stamp":    datetime.now().strftime("%Y%m%d_%H%M%S"),
+        }
+ 
+    st.session_state.scan_done = True
+ 
+# ══ DISPLAY RESULTS (reads from session_state — survives filter reruns) ═══════
+if st.session_state.scan_done and st.session_state.scan_targets:
+    for ip, data in st.session_state.scan_targets.items():
+        target   = data["target"]
+        os_guess = data["os_guess"]
+        elapsed  = data["elapsed"]
+        sorted_r = data["sorted_r"]
+        stamp    = data["stamp"]
+        highs    = [r for r in sorted_r if r["risk"] == "HIGH"]
+        meds     = [r for r in sorted_r if r["risk"] == "MEDIUM"]
+        lows     = [r for r in sorted_r if r["risk"] == "LOW"]
+ 
+        st.markdown(f'<div class="section-head">RESULTS — {target} ({ip})</div>',
+                    unsafe_allow_html=True)
+ 
+        # Stats
+        s1, s2, s3, s4, s5 = st.columns(5)
+        for col, num, lbl, color in [
+            (s1, len(sorted_r),     "OPEN PORTS",  "#00ff88"),
+            (s2, len(highs),        "HIGH RISK",   "#ff3333"),
+            (s3, len(meds),         "MEDIUM RISK", "#ffaa00"),
+            (s4, len(lows),         "LOW RISK",    "#00ccff"),
+            (s5, f"{elapsed:.1f}s", "SCAN TIME",   "#555"),
+        ]:
+            col.markdown(f"""<div class="stat-card">
+                <div class="stat-num" style="color:{color}">{num}</div>
+                <div class="stat-lbl">{lbl}</div></div>""", unsafe_allow_html=True)
+ 
+        # OS badge
+        st.markdown(
+            f'<div style="margin:0.8rem 0 0.2rem 0;">OS Fingerprint: '
+            f'<span class="os-badge">{os_guess}</span></div>',
+            unsafe_allow_html=True
+        )
+ 
+        if sorted_r:
+            st.markdown('<div class="section-head">OPEN PORTS</div>', unsafe_allow_html=True)
+ 
+            # ✅ Filter works because results come from session_state
+            risk_filter = st.selectbox(
+                "🔍 Filter by Risk", ["All", "HIGH", "MEDIUM", "LOW"],
+                key=f"rf_{ip}", label_visibility="visible"
+            )
+            filtered = sorted_r if risk_filter == "All" else \
+                       [r for r in sorted_r if r["risk"] == risk_filter]
+ 
+            h1, h2, h3, h4 = st.columns([1, 2, 1.5, 4])
+            h1.markdown("**PORT**"); h2.markdown("**SERVICE**")
+            h3.markdown("**RISK**"); h4.markdown("**BANNER / NOTE**")
+ 
+            for r in filtered:
+                c1, c2, c3, c4 = st.columns([1, 2, 1.5, 4])
+                ri  = r["risk"]
+                ico = {"HIGH":"🔴","MEDIUM":"🟡","LOW":"🟢"}.get(ri, "⚪")
+                c1.markdown(f"`{r['port']}`")
+                c2.markdown(f"**{r['service']}**")
+                c3.markdown(f"{ico} **{ri}**")
+                bnr = f"`{r['banner'][:45]}`" if r["banner"] else ""
+                tip = r["cve_note"] if r["cve_note"] else None
+                cve = " ⚠️" if r["cve_note"] else ""
+                c4.markdown(f"{bnr}{cve}", help=tip)
+ 
+            # CVE Alerts
+            cve_ports = [r for r in sorted_r if r["cve_note"]]
+            if cve_ports:
+                st.markdown('<div class="section-head">🚨 CVE / SECURITY ALERTS</div>',
+                            unsafe_allow_html=True)
+                for r in cve_ports:
+                    ico = "🔴" if r["risk"] == "HIGH" else "🟡"
+                    st.error(f"{ico} **Port {r['port']} ({r['service']})** — {r['cve_note']}")
+ 
+            # High Risk Summary
+            if highs:
+                st.markdown('<div class="section-head">⚠ HIGH RISK SUMMARY</div>',
+                            unsafe_allow_html=True)
+                for r in highs:
+                    note = r["cve_note"] or "Commonly exploited — review immediately"
+                    st.markdown(
+                        f'<div class="cve-block">• Port <b>{r["port"]}</b> '
+                        f'({r["service"]}) — {note}</div>',
+                        unsafe_allow_html=True
+                    )
+        else:
+            st.info(f"No open ports found on {ip}.")
+ 
+        # Export
+        st.markdown('<div class="section-head">💾 EXPORT REPORT</div>', unsafe_allow_html=True)
+        e1, e2 = st.columns(2)
+        e1.download_button("⬇️ Download JSON",
+            data=build_json(target, ip, os_guess, data["mode"], elapsed, sorted_r),
+            file_name=f"scan_{ip}_{stamp}.json",
+            mime="application/json", key=f"json_{ip}_{stamp}")
+        e2.download_button("⬇️ Download TXT",
+            data=build_txt(target, ip, os_guess, data["mode"], elapsed, sorted_r),
+            file_name=f"scan_{ip}_{stamp}.txt",
+            mime="text/plain", key=f"txt_{ip}_{stamp}")
+ 
+        st.markdown("---")
  
 # ══ FOOTER ════════════════════════════════════════════════════════════════════
 st.markdown(
     '<div class="footer">PORT SCANNER v6.0 • TARUN-30 • '
-    'GITHUB.COM/TARUN-30 • 🌍 RESTORED</div>',
+    'GITHUB.COM/TARUN-30 • 🌍RESTORED</div>',
     unsafe_allow_html=True
 )
- 
