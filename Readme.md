@@ -18,6 +18,7 @@ A beginner-to-advanced Python port scanner built progressively across 6 versions
 | v4.0    | `v4_scan_modes.py`        | 5 scan modes, UDP scanning, risk tagging, progress bar |
 | v5.0    | `v5_cli_reports.py`       | Full argparse CLI, JSON + TXT report export            |
 | v6.0    | `v6_final.py`             | Subnet scanning, OS hints, CVE alerts, stealth mode    |
+| Web App | `PortScanner_app.py`      | 🛸 Cyberpunk Streamlit UI, 🛡️ Remediation Guide, Emojis |
 
 ---
 
@@ -25,13 +26,14 @@ A beginner-to-advanced Python port scanner built progressively across 6 versions
 
 ```bash
 git clone https://github.com/Tarun-30/PortScanner
-cd PortScanner/versions
+cd PortScanner
 
-# Run the final version
+# Run the Web Dashboard (Recommended)
+pip install streamlit
+streamlit run PortScanner_app.py
+
+# Or run the final CLI version (if in versions folder)
 python v6_final.py -t 192.168.1.1
-
-# Or start with the basics
-python v1_basic.py
 ```
 
 ---
@@ -157,6 +159,14 @@ python v6_final.py -t 10.0.0.1 --quiet | grep HIGH
 - `--stealth` randomized scan mode
 - Dual interactive + CLI mode
 - Full scan metadata in reports
+
+### Web App — `PortScanner_app.py`
+
+- Full **Streamlit dashboard** with interactive 🛸 cyberpunk aesthetics.
+- 🛡️ **Comprehensive Remediation Guide** with step-by-step mitigation advice per port.
+- 🔴 Native **Emoji support** for visual identification of risk levels and critical CVEs.
+- Detailed visual summaries of HIGH, MEDIUM, and LOW risk findings.
+- One-click downloads for JSON and TXT reports from the browser.
 
 ---
 

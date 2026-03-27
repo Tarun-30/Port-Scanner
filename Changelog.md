@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Web App] — Streamlit Dashboard
+
+### Added
+
+- 🛸 Full interactive cyber-themed Web App built with `streamlit`.
+- 🛡️ **Remediation Guide**: Expandable step-by-step mitigation advice for over 50+ open ports and services.
+- 🔴 **Emoji Support**: Native, uncorrupted UTF-8 emojis for improved UX and rapid visual identification of port risks.
+- Export results directly from the browser window (TXT and JSON downlods).
+- Real-time dynamic visual summaries and filtering.
+
+---
+
 ## [v6.0] — Final Release
 
 ### Added
